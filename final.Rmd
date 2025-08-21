@@ -1,0 +1,1423 @@
+```{r}
+library(readxl)
+library(dplyr)
+Ordinary_Data <- read_excel("C:\\Users\\54147\\Desktop\\Final Project\\Cleaned_Data.xlsx", sheet = "Sheet2") 
+```
+
+```{r}
+library(dplyr)
+
+# 确保你的数据框变量名正确
+Ordinary_Data <- Ordinary_Data %>%
+  mutate(
+    x = as.numeric(x),
+    y = as.numeric(y)
+  )
+
+# 赞比亚（Zambia）筛选
+Zambia_Data <- Ordinary_Data %>%
+  mutate(
+    x = as.numeric(x),
+    y = as.numeric(y)
+  ) %>%
+  filter(x >= 22 & x <= 33 & y <= -8 & y >= -18)
+
+# 马拉维（Malawi）筛选
+Malawi_Data <- Ordinary_Data %>%
+  mutate(
+    x = as.numeric(x),
+    y = as.numeric(y)
+  ) %>%
+  filter(x >= 33 & x <= 36 & y <= -9.8 & y >= -17.5)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# 函数：将字符串形式的浓度范围转换为数值
+convert_range_to_numeric_verbose <- function(x) {
+  numeric_values <- rep(NA_real_, length(x))
+  unconverted <- c()
+  
+  for (i in seq_along(x)) {
+    val <- trimws(as.character(x[i]))
+    if (grepl("^<", val)) {
+      numeric_values[i] <- as.numeric(sub("<", "", val)) / 2
+    } else if (grepl("^>", val)) {
+      numeric_values[i] <- as.numeric(sub(">", "", val)) * 1.1
+    } else if (grepl("-", val)) {
+      parts <- strsplit(val, "-")[[1]]
+      if (length(parts) == 2 && all(grepl("^[0-9.]+$", parts))) {
+        numeric_values[i] <- mean(as.numeric(parts))
+      } else {
+        unconverted <- c(unconverted, val)
+      }
+    } else if (grepl("^[0-9.]+$", val)) {
+      numeric_values[i] <- as.numeric(val)
+    } else {
+      unconverted <- c(unconverted, val)
+    }
+  }
+  
+  if (length(unconverted) > 0) {
+    cat("⚠️ 以下值无法识别并已跳过:\n")
+    print(unique(unconverted))
+  }
+  
+  return(numeric_values)
+}
+
+# 原始数据统计
+cat("原始数据完整性统计：\n")
+cat("Zambia 原始 Nitrate 非NA数: ", sum(!is.na(Zambia_Data$`Nitrate (mg/L)`)), "\n")
+cat("Zambia 原始 Phosphate 非NA数: ", sum(!is.na(Zambia_Data$`Phosphate (mg/L)`)), "\n")
+cat("Malawi 原始 Nitrate 非NA数: ", sum(!is.na(Malawi_Data$`Nitrate (mg/L)`)), "\n")
+cat("Malawi 原始 Phosphate 非NA数: ", sum(!is.na(Malawi_Data$`Phosphate (mg/L)`)), "\n\n")
+
+# 数据转换与清洗
+Zambia_clean <- Zambia_Data %>%
+  mutate(
+    Country = "Zambia",
+    Nitrate_num = convert_range_to_numeric_verbose(`Nitrate (mg/L)`),
+    Phosphate_num = convert_range_to_numeric_verbose(`Phosphate (mg/L)`)
+  ) %>%
+  filter(!is.na(Nitrate_num), !is.na(Phosphate_num))
+
+Malawi_clean <- Malawi_Data %>%
+  mutate(
+    Country = "Malawi",
+    Nitrate_num = convert_range_to_numeric_verbose(`Nitrate (mg/L)`),
+    Phosphate_num = convert_range_to_numeric_verbose(`Phosphate (mg/L)`)
+  ) %>%
+  filter(!is.na(Nitrate_num), !is.na(Phosphate_num))
+
+# 合并数据
+combined_np <- bind_rows(Zambia_clean, Malawi_clean)
+cat("合并后总记录数: ", nrow(combined_np), "\n\n")
+
+# =============================
+# 图 1：普通散点图 + 回归线
+# =============================
+p1 <- ggplot(combined_np, aes(x = Nitrate_num, y = Phosphate_num)) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "lm", se = TRUE, color = "darkblue") +
+  facet_wrap(~Country) +
+  labs(
+    title = "Linear Relationship between Nitrate and Phosphate (No Jitter)",
+    x = "Nitrate (mg/L)",
+    y = "Phosphate (mg/L)"
+  ) +
+  theme_minimal()
+
+# =============================
+# 图 2：带抖动的散点图 + 回归线
+# =============================
+p2 <- ggplot(combined_np, aes(x = Nitrate_num, y = Phosphate_num)) +
+  geom_jitter(width = 0.2, height = 0.02, alpha = 0.5, color = "black") +
+  geom_smooth(method = "lm", se = TRUE, color = "darkred") +
+  facet_wrap(~Country) +
+  labs(
+    title = "Linear Relationship between Nitrate and Phosphate (With Jitter)",
+    x = "Nitrate (mg/L)",
+    y = "Phosphate (mg/L)"
+  ) +
+  theme_minimal()
+
+# 显示图像
+print(p1)
+print(p2)
+```
+```{r}
+library(ggplot2)
+
+# 分箱
+combined_np <- combined_np %>%
+  mutate(
+    Nitrate_bin = cut(
+      Nitrate_num,
+      breaks = c(0, 0.2, 0.5, 1, 2, 5, 10),
+      include.lowest = TRUE,
+      right = FALSE,
+      labels = c("[0-0.2)", "[0.2-0.5)", "[0.5-1)", "[1-2)", "[2-5)", "[5-10)")
+    )
+  )
+
+# 绘制箱型图：Nitrate 分箱 → Phosphate 分布
+p3 <- ggplot(combined_np, aes(x = Nitrate_bin, y = Phosphate_num, fill = Country)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 1, outlier.alpha = 0.4) +
+  facet_wrap(~Country) +
+  labs(
+    title = "Distribution of Phosphate by Nitrate Bins",
+    x = "Nitrate (mg/L) Bins",
+    y = "Phosphate (mg/L)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# 显示箱型图
+print(p3)
+```
+```{r}
+# Spearman 相关性（适用于非正态分布）
+cor_spearman <- cor.test(combined_np$Nitrate_num, combined_np$Phosphate_num, method = "spearman")
+
+# Pearson 相关性（适用于正态分布数据）
+cor_pearson <- cor.test(combined_np$Nitrate_num, combined_np$Phosphate_num, method = "pearson")
+
+# 打印结果
+cat("=== Spearman Correlation ===\n")
+print(cor_spearman)
+
+cat("\n=== Pearson Correlation ===\n")
+print(cor_pearson)
+
+# 按国家分组 Spearman 相关性
+library(dplyr)
+
+spearman_by_country <- combined_np %>%
+  group_by(Country) %>%
+  summarise(
+    spearman_cor = cor(Nitrate_num, Phosphate_num, method = "spearman"),
+    pearson_cor = cor(Nitrate_num, Phosphate_num, method = "pearson")
+  )
+
+print(spearman_by_country)
+
+# 总体线性模型
+lm_all <- lm(Phosphate_num ~ Nitrate_num, data = combined_np)
+summary(lm_all)
+
+# 分国家回归
+lm_malawi <- lm(Phosphate_num ~ Nitrate_num, data = filter(combined_np, Country == "Malawi"))
+lm_zambia <- lm(Phosphate_num ~ Nitrate_num, data = filter(combined_np, Country == "Zambia"))
+
+summary(lm_malawi)
+summary(lm_zambia)
+
+library(ggplot2)
+
+ggplot(combined_np, aes(x = Nitrate_num, y = Phosphate_num, color = Country)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Linear Regression: Nitrate vs Phosphate by Country",
+    x = "Nitrate (mg/L)",
+    y = "Phosphate (mg/L)"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+library(sf)
+library(spdep)
+library(dplyr)
+library(ggplot2)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(patchwork)
+
+# 1. 处理函数
+parse_mid <- function(x) {
+  x <- trimws(x)
+  if (is.na(x) || x == "") return(NA_real_)
+  if (grepl("^<", x)) return(as.numeric(sub("<", "", x)) / 2)
+  if (grepl("-", x)) {
+    parts <- as.numeric(strsplit(x, "-")[[1]])
+    return(mean(parts, na.rm = TRUE))
+  }
+  as.numeric(x)
+}
+
+# 2. 准备数据（Zambia & Malawi）
+prepare_sf_data <- function(df, country_name) {
+  df <- df %>%
+    mutate(
+      Nitrate_numeric = sapply(`Nitrate (mg/L)`, parse_mid),
+      Phosphate_numeric = sapply(`Phosphate (mg/L)`, parse_mid)
+    ) %>%
+    filter(!is.na(x), !is.na(y), !is.na(Nitrate_numeric), !is.na(Phosphate_numeric)) %>%
+    st_as_sf(coords = c("x", "y"), crs = 4326)
+  
+  nb <- dnearneigh(st_coordinates(df), d1 = 0, d2 = 0.5)
+  lw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+  
+  df$zscore_nitrate <- as.numeric(localG(df$Nitrate_numeric, lw, zero.policy = TRUE))
+  df$zscore_phosphate <- as.numeric(localG(df$Phosphate_numeric, lw, zero.policy = TRUE))
+  
+  return(df)
+}
+
+zambia_sf <- prepare_sf_data(Zambia_Data, "Zambia")
+malawi_sf <- prepare_sf_data(Malawi_Data, "Malawi")
+
+zambia_country <- ne_countries(scale = "medium", country = "Zambia", returnclass = "sf")
+malawi_country <- ne_countries(scale = "medium", country = "Malawi", returnclass = "sf")
+
+# 3. 绘图函数
+plot_map <- function(sf_data, country_map, var, title) {
+  ggplot() +
+    geom_sf(data = country_map, fill = "grey95", color = "black") +
+    geom_sf(data = sf_data, aes_string(color = var), size = 1.5) +
+    scale_color_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+    labs(title = title, color = "Z-score") +
+    theme_minimal()
+}
+
+# 4. 四张图
+p1 <- plot_map(zambia_sf, zambia_country, "zscore_nitrate", "Zambia - Nitrate")
+p2 <- plot_map(zambia_sf, zambia_country, "zscore_phosphate", "Zambia - Phosphate")
+p3 <- plot_map(malawi_sf, malawi_country, "zscore_nitrate", "Malawi - Nitrate")
+p4 <- plot_map(malawi_sf, malawi_country, "zscore_phosphate", "Malawi - Phosphate")
+
+# 5. 合并输出
+(p1 | p2) / (p3 | p4)
+```
+```{r}
+# 加载库
+library(readxl)
+library(dplyr)
+library(vcd)
+
+# 预处理 Malawi 数据（只重命名，不改类型）
+MNO3 <- Malawi_Data %>%
+  rename(
+    NO3_cat   = `Nitrate (mg/L)`,
+    Flow_cat  = `Estimate the water flow`,
+    Level_cat = `Estimate the water level`,
+    Rain_cat  = `Has there been any rain during the last 24 hours?`,
+    Width_cat = `Estimate the waterway width (by measuring the widest bank distance at your current location) (m)`,
+    BodyType  = `Freshwater body type`
+  ) %>%
+  filter(!is.na(NO3_cat))
+
+# 要分析的变量列表
+categoricals <- c("Rain_cat", "Flow_cat", "Level_cat", "Width_cat", "BodyType")
+
+# 储存原始 p 值的容器
+p_vals <- c()
+var_names <- c()
+cramers_v <- c()
+
+# 修改函数：输出并收集 p 值
+run_chi_phosphate <- function(df, var_cat) {
+  tbl <- table(df[[var_cat]], df$NO3_cat)
+  tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+  cat("\n=== Crosstab:", var_cat, "vs. NO3_cat ===\n")
+  print(tbl)
+
+  chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+  print(chi)
+
+  cr <- assocstats(tbl)$cramer
+  cat("Cramér’s V =", round(cr, 3), "\n")
+
+  # 收集结果
+  p_vals <<- c(p_vals, chi$p.value)
+  var_names <<- c(var_names, var_cat)
+  cramers_v <<- c(cramers_v, cr)
+}
+
+# 执行每个变量的分析
+for (var in categoricals) {
+  run_chi_phosphate(MNO3, var)
+}
+
+# 统一 Bonferroni 校正
+adjusted_p <- p.adjust(p_vals, method = "bonferroni")
+
+# 输出调整后结果
+result_table <- data.frame(
+  Variable = var_names,
+  Raw_p_value = round(p_vals, 4),
+  Adjusted_p_Bonferroni = round(adjusted_p, 4),
+  Cramers_V = round(cramers_v, 3)
+)
+
+print(result_table)
+```
+```{r}
+# 加载库
+library(readxl)
+library(dplyr)
+library(vcd)
+
+# 预处理 Malawi 数据（只重命名，不改类型）
+MPO4 <- Malawi_Data %>%
+  rename(
+    PO4_cat   = `Phosphate (mg/L)`,
+    Flow_cat  = `Estimate the water flow`,
+    Level_cat = `Estimate the water level`,
+    Rain_cat  = `Has there been any rain during the last 24 hours?`,
+    Width_cat = `Estimate the waterway width (by measuring the widest bank distance at your current location) (m)`,
+    BodyType  = `Freshwater body type`
+  ) %>%
+  filter(!is.na(PO4_cat))
+
+# 要分析的变量列表
+categoricals <- c("Rain_cat", "Flow_cat", "Level_cat", "Width_cat", "BodyType")
+
+# 储存原始 p 值的容器
+p_vals <- c()
+var_names <- c()
+cramers_v <- c()
+
+# 修改函数：输出并收集 p 值
+run_chi_phosphate <- function(df, var_cat) {
+  tbl <- table(df[[var_cat]], df$PO4_cat)
+  tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+  cat("\n=== Crosstab:", var_cat, "vs. PO4_cat ===\n")
+  print(tbl)
+
+  chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+  print(chi)
+
+  cr <- assocstats(tbl)$cramer
+  cat("Cramér’s V =", round(cr, 3), "\n")
+
+  # 收集结果
+  p_vals <<- c(p_vals, chi$p.value)
+  var_names <<- c(var_names, var_cat)
+  cramers_v <<- c(cramers_v, cr)
+}
+
+# 执行每个变量的分析
+for (var in categoricals) {
+  run_chi_phosphate(MPO4, var)
+}
+
+# 统一 Bonferroni 校正
+adjusted_p <- p.adjust(p_vals, method = "bonferroni")
+
+# 输出调整后结果
+result_table <- data.frame(
+  Variable = var_names,
+  Raw_p_value = round(p_vals, 4),
+  Adjusted_p_Bonferroni = round(adjusted_p, 4),
+  Cramers_V = round(cramers_v, 3)
+)
+
+print(result_table)
+
+```
+```{r}
+# 加载所需包
+library(readxl)
+library(dplyr)
+library(vcd)
+
+# 预处理 Zambia 数据（重命名 + 过滤 NA）
+ZNO3 <- Zambia_Data %>%
+  rename(
+    NO3_cat   = `Nitrate (mg/L)`,
+    Flow_cat  = `Estimate the water flow`,
+    Level_cat = `Estimate the water level`,
+    Rain_cat  = `Has there been any rain during the last 24 hours?`,
+    Width_cat = `Estimate the waterway width (by measuring the widest bank distance at your current location) (m)`,
+    BodyType  = `Freshwater body type`
+  ) %>%
+  filter(!is.na(NO3_cat))
+
+# 要分析的变量列表
+categoricals <- c("Rain_cat", "Flow_cat", "Level_cat", "Width_cat", "BodyType")
+
+# 用于收集结果的容器
+p_vals <- c()
+var_names <- c()
+cramers_v <- c()
+
+# 卡方检验函数
+run_chi_nitrate <- function(df, var_cat) {
+  tbl <- table(df[[var_cat]], df$NO3_cat)
+  tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+  
+  cat("\n=== Crosstab:", var_cat, "vs. NO3_cat ===\n")
+  print(tbl)
+  
+  chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+  print(chi)
+  
+  cr <- assocstats(tbl)$cramer
+  cat("Cramér’s V =", round(cr, 3), "\n")
+  
+  # 收集结果
+  p_vals <<- c(p_vals, chi$p.value)
+  var_names <<- c(var_names, var_cat)
+  cramers_v <<- c(cramers_v, cr)
+}
+
+# 执行所有变量的分析
+for (var in categoricals) {
+  run_chi_nitrate(ZNO3, var)
+}
+
+# Bonferroni 校正
+adjusted_p <- p.adjust(p_vals, method = "bonferroni")
+
+# 整理输出
+result_table <- data.frame(
+  Variable = var_names,
+  Raw_p_value = round(p_vals, 4),
+  Adjusted_p_Bonferroni = round(adjusted_p, 4),
+  Cramers_V = round(cramers_v, 3)
+)
+
+print(result_table)
+
+```
+```{r}
+# 加载所需包
+library(readxl)
+library(dplyr)
+library(vcd)
+
+# 预处理 Zambia 数据（重命名 + 过滤 NA）
+ZPO4 <- Zambia_Data %>%
+  rename(
+    PO4_cat   = `Phosphate (mg/L)`,
+    Flow_cat  = `Estimate the water flow`,
+    Level_cat = `Estimate the water level`,
+    Rain_cat  = `Has there been any rain during the last 24 hours?`,
+    Width_cat = `Estimate the waterway width (by measuring the widest bank distance at your current location) (m)`,
+    BodyType  = `Freshwater body type`
+  ) %>%
+  filter(!is.na(PO4_cat))
+
+# 要分析的变量列表
+categoricals <- c("Rain_cat", "Flow_cat", "Level_cat", "Width_cat", "BodyType")
+
+# 用于收集结果的容器
+p_vals <- c()
+var_names <- c()
+cramers_v <- c()
+
+# 卡方检验函数
+run_chi_nitrate <- function(df, var_cat) {
+  tbl <- table(df[[var_cat]], df$PO4_cat)
+  tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+  
+  cat("\n=== Crosstab:", var_cat, "vs. PO4_cat ===\n")
+  print(tbl)
+  
+  chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+  print(chi)
+  
+  cr <- assocstats(tbl)$cramer
+  cat("Cramér’s V =", round(cr, 3), "\n")
+  
+  # 收集结果
+  p_vals <<- c(p_vals, chi$p.value)
+  var_names <<- c(var_names, var_cat)
+  cramers_v <<- c(cramers_v, cr)
+}
+
+# 执行所有变量的分析
+for (var in categoricals) {
+  run_chi_nitrate(ZPO4, var)
+}
+
+# Bonferroni 校正
+adjusted_p <- p.adjust(p_vals, method = "bonferroni")
+
+# 整理输出
+result_table <- data.frame(
+  Variable = var_names,
+  Raw_p_value = round(p_vals, 4),
+  Adjusted_p_Bonferroni = round(adjusted_p, 4),
+  Cramers_V = round(cramers_v, 3)
+)
+
+print(result_table)
+```
+
+```{r}
+# 加载必要库
+library(dplyr)
+library(vcd)
+
+# 数据准备：重命名并过滤
+Malawi_Phos_Nit_WU <- Malawi_Data %>%
+  rename(
+    PO4_cat         = `Phosphate (mg/L)`,
+    NO3_cat         = `Nitrate (mg/L)`,
+    Boating         = Boating,
+    Irrigation      = Irrigation,
+    Fishing         = Fishing,
+    Swimming        = Swimming,
+    WaterSupply     = Public_water_supply,
+    AnimalAccess    = Animal_access,
+    OtherWaterUse   = Other_wateruse
+  ) %>%
+  filter(!is.na(PO4_cat) & !is.na(NO3_cat))
+
+# 用水行为变量
+use_vars <- c("Boating", "Irrigation", "Fishing", "Swimming",
+              "WaterSupply", "AnimalAccess", "OtherWaterUse")
+
+# 定义分析函数
+analyze_chi_sq <- function(data, outcome_var, use_vars) {
+  p_vals <- c()
+  cramer_vals <- c()
+
+  cat("\n=============\nAnalyzing:", outcome_var, "\n=============\n")
+
+  for (var in use_vars) {
+    tbl <- table(data[[var]], data[[outcome_var]])
+    tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+    cat("\n---", var, "vs.", outcome_var, "---\n")
+    print(tbl)
+
+    # 安全检查：不是矩阵或维度过小
+    if (!is.matrix(tbl) || nrow(tbl) < 2 || ncol(tbl) < 2) {
+      cat("⚠️ 非法交叉表（非矩阵或维度不足），跳过此变量\n")
+      p_vals <- c(p_vals, NA)
+      cramer_vals <- c(cramer_vals, NA)
+      next
+    }
+
+    # 卡方检验和 Cramér’s V
+    chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+    print(chi)
+
+    cr <- assocstats(tbl)$cramer
+    cat("Cramér’s V =", round(cr, 3), "\n")
+
+    p_vals <- c(p_vals, chi$p.value)
+    cramer_vals <- c(cramer_vals, cr)
+  }
+
+  # Bonferroni 校正
+  adj_p <- p.adjust(p_vals, method = "bonferroni")
+
+  result <- data.frame(
+    Variable = use_vars,
+    Raw_p = round(p_vals, 4),
+    Bonferroni_p = round(adj_p, 4),
+    Cramers_V = round(cramer_vals, 3)
+  )
+  return(result)
+}
+
+# 分析 PO₄ 和 NO₃
+result_Malawi_PO4 <- analyze_chi_sq(Malawi_Phos_Nit_WU, "PO4_cat", use_vars)
+result_Malawi_NO3 <- analyze_chi_sq(Malawi_Phos_Nit_WU, "NO3_cat", use_vars)
+
+# 打印最终结果
+cat("\n\n=== Final Results: PO4 ===\n")
+print(result_Malawi_PO4)
+
+cat("\n\n=== Final Results: NO3 ===\n")
+print(result_Malawi_NO3)
+
+# 保存为 CSV
+write.csv(result_Malawi_PO4, "Malawi_PO4_Crosstab_Results.csv", row.names = FALSE)
+write.csv(result_Malawi_NO3, "Malawi_NO3_Crosstab_Results.csv", row.names = FALSE)
+```
+
+```{r}
+# 加载必要库
+library(dplyr)
+library(vcd)
+
+# 数据准备：重命名并过滤
+Zambia_Phos_Nit_WU <- Zambia_Data %>%
+  rename(
+    PO4_cat         = `Phosphate (mg/L)`,
+    NO3_cat         = `Nitrate (mg/L)`,
+    Boating         = Boating,
+    Irrigation      = Irrigation,
+    Fishing         = Fishing,
+    Swimming        = Swimming,
+    WaterSupply     = Public_water_supply,
+    AnimalAccess    = Animal_access,
+    OtherWaterUse   = Other_wateruse
+  ) %>%
+  filter(!is.na(PO4_cat) & !is.na(NO3_cat))
+
+# 用水行为变量
+use_vars <- c("Boating", "Irrigation", "Fishing", "Swimming",
+              "WaterSupply", "AnimalAccess", "OtherWaterUse")
+
+# 定义分析函数（与 Malawi 通用）
+analyze_chi_sq <- function(data, outcome_var, use_vars) {
+  p_vals <- c()
+  cramer_vals <- c()
+
+  cat("\n=============\nAnalyzing:", outcome_var, "\n=============\n")
+
+  for (var in use_vars) {
+    tbl <- table(data[[var]], data[[outcome_var]])
+    tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+    cat("\n---", var, "vs.", outcome_var, "---\n")
+    print(tbl)
+
+    if (!is.matrix(tbl) || nrow(tbl) < 2 || ncol(tbl) < 2) {
+      cat("⚠️ 非法交叉表（非矩阵或维度不足），跳过此变量\n")
+      p_vals <- c(p_vals, NA)
+      cramer_vals <- c(cramer_vals, NA)
+      next
+    }
+
+    chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+    print(chi)
+
+    cr <- assocstats(tbl)$cramer
+    cat("Cramér’s V =", round(cr, 3), "\n")
+
+    p_vals <- c(p_vals, chi$p.value)
+    cramer_vals <- c(cramer_vals, cr)
+  }
+
+  adj_p <- p.adjust(p_vals, method = "bonferroni")
+
+  result <- data.frame(
+    Variable = use_vars,
+    Raw_p = round(p_vals, 4),
+    Bonferroni_p = round(adj_p, 4),
+    Cramers_V = round(cramer_vals, 3)
+  )
+  return(result)
+}
+
+# 分析 PO₄ 和 NO₃
+result_Zambia_PO4 <- analyze_chi_sq(Zambia_Phos_Nit_WU, "PO4_cat", use_vars)
+result_Zambia_NO3 <- analyze_chi_sq(Zambia_Phos_Nit_WU, "NO3_cat", use_vars)
+
+# 打印最终结果
+cat("\n\n=== Final Results: PO4 ===\n")
+print(result_Zambia_PO4)
+
+cat("\n\n=== Final Results: NO3 ===\n")
+print(result_Zambia_NO3)
+
+# 保存为 CSV
+write.csv(result_Zambia_PO4, "Zambia_PO4_Crosstab_Results.csv", row.names = FALSE)
+write.csv(result_Zambia_NO3, "Zambia_NO3_Crosstab_Results.csv", row.names = FALSE)
+```
+```{r}
+# 加载必要库
+library(dplyr)
+library(vcd)
+
+# 数据准备：重命名并过滤
+Zambia_LandUse <- Zambia_Data %>%
+  rename(
+    PO4_cat          = `Phosphate (mg/L)`,
+    NO3_cat          = `Nitrate (mg/L)`,
+    Agriculture      = Agriculture,
+    UrbanResidential = Urban_residential,
+    RuralResidential = Rural_residential,
+    Grassland        = Grassland,
+    OtherLanduse     = Other_landuse
+  ) %>%
+  filter(!is.na(PO4_cat) & !is.na(NO3_cat))
+
+# 土地利用变量
+landuse_vars <- c("Agriculture", "UrbanResidential", "RuralResidential",
+                  "Grassland", "OtherLanduse")
+
+# 定义分析函数（与原逻辑相同）
+analyze_chi_sq <- function(data, outcome_var, input_vars) {
+  p_vals <- c()
+  cramer_vals <- c()
+
+  cat("\n=============\nAnalyzing:", outcome_var, "\n=============\n")
+
+  for (var in input_vars) {
+    tbl <- table(data[[var]], data[[outcome_var]])
+    tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+    cat("\n---", var, "vs.", outcome_var, "---\n")
+    print(tbl)
+
+    if (!is.matrix(tbl) || nrow(tbl) < 2 || ncol(tbl) < 2) {
+      cat("⚠️ 非法交叉表（非矩阵或维度不足），跳过此变量\n")
+      p_vals <- c(p_vals, NA)
+      cramer_vals <- c(cramer_vals, NA)
+      next
+    }
+
+    chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+    print(chi)
+
+    cr <- assocstats(tbl)$cramer
+    cat("Cramér’s V =", round(cr, 3), "\n")
+
+    p_vals <- c(p_vals, chi$p.value)
+    cramer_vals <- c(cramer_vals, cr)
+  }
+
+  adj_p <- p.adjust(p_vals, method = "bonferroni")
+
+  result <- data.frame(
+    Variable = input_vars,
+    Raw_p = round(p_vals, 4),
+    Bonferroni_p = round(adj_p, 4),
+    Cramers_V = round(cramer_vals, 3)
+  )
+  return(result)
+}
+
+# 分析 PO₄ 和 NO₃ 与土地利用之间的关系
+result_Zambia_PO4_landuse <- analyze_chi_sq(Zambia_LandUse, "PO4_cat", landuse_vars)
+result_Zambia_NO3_landuse <- analyze_chi_sq(Zambia_LandUse, "NO3_cat", landuse_vars)
+
+# 打印最终结果
+cat("\n\n=== Final Results: PO4 vs Land Use ===\n")
+print(result_Zambia_PO4_landuse)
+
+cat("\n\n=== Final Results: NO3 vs Land Use ===\n")
+print(result_Zambia_NO3_landuse)
+
+# 保存为 CSV
+write.csv(result_Zambia_PO4_landuse, "Zambia_PO4_LandUse_Results.csv", row.names = FALSE)
+write.csv(result_Zambia_NO3_landuse, "Zambia_NO3_LandUse_Results.csv", row.names = FALSE)
+```
+```{r}
+# 加载必要库
+library(dplyr)
+library(vcd)
+
+# 数据准备：重命名并过滤
+Malawi_LandUse <- Malawi_Data %>%
+  rename(
+    PO4_cat          = `Phosphate (mg/L)`,
+    NO3_cat          = `Nitrate (mg/L)`,
+    Agriculture      = Agriculture,
+    UrbanResidential = Urban_residential,
+    RuralResidential = Rural_residential,
+    Grassland        = Grassland,
+    OtherLanduse     = Other_landuse
+  ) %>%
+  filter(!is.na(PO4_cat) & !is.na(NO3_cat))
+
+# 土地利用变量列表
+landuse_vars <- c("Agriculture", "UrbanResidential", "RuralResidential",
+                  "Grassland", "OtherLanduse")
+
+# 分析函数（与赞比亚通用）
+analyze_chi_sq <- function(data, outcome_var, input_vars) {
+  p_vals <- c()
+  cramer_vals <- c()
+
+  cat("\n=============\nAnalyzing:", outcome_var, "\n=============\n")
+
+  for (var in input_vars) {
+    tbl <- table(data[[var]], data[[outcome_var]])
+    tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+    cat("\n---", var, "vs.", outcome_var, "---\n")
+    print(tbl)
+
+    if (!is.matrix(tbl) || nrow(tbl) < 2 || ncol(tbl) < 2) {
+      cat("⚠️ 非法交叉表（非矩阵或维度不足），跳过此变量\n")
+      p_vals <- c(p_vals, NA)
+      cramer_vals <- c(cramer_vals, NA)
+      next
+    }
+
+    chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+    print(chi)
+
+    cr <- assocstats(tbl)$cramer
+    cat("Cramér’s V =", round(cr, 3), "\n")
+
+    p_vals <- c(p_vals, chi$p.value)
+    cramer_vals <- c(cramer_vals, cr)
+  }
+
+  adj_p <- p.adjust(p_vals, method = "bonferroni")
+
+  result <- data.frame(
+    Variable = input_vars,
+    Raw_p = round(p_vals, 4),
+    Bonferroni_p = round(adj_p, 4),
+    Cramers_V = round(cramer_vals, 3)
+  )
+  return(result)
+}
+
+# 分析 PO₄ 和 NO₃ 与土地利用关系
+result_Malawi_PO4_landuse <- analyze_chi_sq(Malawi_LandUse, "PO4_cat", landuse_vars)
+result_Malawi_NO3_landuse <- analyze_chi_sq(Malawi_LandUse, "NO3_cat", landuse_vars)
+
+# 打印最终结果
+cat("\n\n=== Final Results: PO4 vs Land Use ===\n")
+print(result_Malawi_PO4_landuse)
+
+cat("\n\n=== Final Results: NO3 vs Land Use ===\n")
+print(result_Malawi_NO3_landuse)
+
+# 保存为 CSV
+write.csv(result_Malawi_PO4_landuse, "Malawi_PO4_LandUse_Results.csv", row.names = FALSE)
+write.csv(result_Malawi_NO3_landuse, "Malawi_NO3_LandUse_Results.csv", row.names = FALSE)
+```
+```{r}
+# 加载必要库
+library(dplyr)
+library(vcd)
+
+# 数据准备：以 Zambia 为例，也可替换为 Malawi_Data
+Zambia_RiverPos <- Zambia_Data %>%
+  rename(
+    PO4_cat             = `Phosphate (mg/L)`,
+    NO3_cat             = `Nitrate (mg/L)`,
+    Edge_1_5m           = `1_5m_from_river_edge`,
+    Edge_1m             = `Within_1m_of_river_edge`,
+    OnWater             = `In_on_the_water`
+  ) %>%
+  filter(!is.na(PO4_cat) & !is.na(NO3_cat))
+
+# 空间变量列表
+riverpos_vars <- c("Edge_1_5m", "Edge_1m", "OnWater")
+
+# 通用卡方分析函数
+analyze_chi_sq <- function(data, outcome_var, input_vars) {
+  p_vals <- c()
+  cramer_vals <- c()
+
+  cat("\n=============\nAnalyzing:", outcome_var, "\n=============\n")
+
+  for (var in input_vars) {
+    tbl <- table(data[[var]], data[[outcome_var]])
+    tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+    cat("\n---", var, "vs.", outcome_var, "---\n")
+    print(tbl)
+
+    if (!is.matrix(tbl) || nrow(tbl) < 2 || ncol(tbl) < 2) {
+      cat("⚠️ 非法交叉表（非矩阵或维度不足），跳过此变量\n")
+      p_vals <- c(p_vals, NA)
+      cramer_vals <- c(cramer_vals, NA)
+      next
+    }
+
+    chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+    print(chi)
+
+    cr <- assocstats(tbl)$cramer
+    cat("Cramér’s V =", round(cr, 3), "\n")
+
+    p_vals <- c(p_vals, chi$p.value)
+    cramer_vals <- c(cramer_vals, cr)
+  }
+
+  adj_p <- p.adjust(p_vals, method = "bonferroni")
+
+  result <- data.frame(
+    Variable = input_vars,
+    Raw_p = round(p_vals, 4),
+    Bonferroni_p = round(adj_p, 4),
+    Cramers_V = round(cramer_vals, 3)
+  )
+  return(result)
+}
+
+# 分析 PO₄ 和 NO₃
+result_River_PO4 <- analyze_chi_sq(Zambia_RiverPos, "PO4_cat", riverpos_vars)
+result_River_NO3 <- analyze_chi_sq(Zambia_RiverPos, "NO3_cat", riverpos_vars)
+
+# 打印结果
+cat("\n\n=== Final Results: PO4 vs River Position ===\n")
+print(result_River_PO4)
+
+cat("\n\n=== Final Results: NO3 vs River Position ===\n")
+print(result_River_NO3)
+
+# 保存结果
+write.csv(result_River_PO4, "RiverPosition_PO4_Results.csv", row.names = FALSE)
+write.csv(result_River_NO3, "RiverPosition_NO3_Results.csv", row.names = FALSE)
+```
+```{r}
+# 加载必要库
+library(dplyr)
+library(vcd)
+
+# 数据准备：马拉维数据 + 重命名
+Malawi_RiverPos <- Malawi_Data %>%
+  rename(
+    PO4_cat             = `Phosphate (mg/L)`,
+    NO3_cat             = `Nitrate (mg/L)`,
+    Edge_1_5m           = `1_5m_from_river_edge`,
+    Edge_1m             = `Within_1m_of_river_edge`,
+    OnWater             = `In_on_the_water`
+  ) %>%
+  filter(!is.na(PO4_cat) & !is.na(NO3_cat))
+
+# 空间位置变量
+riverpos_vars <- c("Edge_1_5m", "Edge_1m", "OnWater")
+
+# 分析函数（与 Zambia 通用）
+analyze_chi_sq <- function(data, outcome_var, input_vars) {
+  p_vals <- c()
+  cramer_vals <- c()
+
+  cat("\n=============\nAnalyzing:", outcome_var, "\n=============\n")
+
+  for (var in input_vars) {
+    tbl <- table(data[[var]], data[[outcome_var]])
+    tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+    cat("\n---", var, "vs.", outcome_var, "---\n")
+    print(tbl)
+
+    if (!is.matrix(tbl) || nrow(tbl) < 2 || ncol(tbl) < 2) {
+      cat("⚠️ 非法交叉表（非矩阵或维度不足），跳过此变量\n")
+      p_vals <- c(p_vals, NA)
+      cramer_vals <- c(cramer_vals, NA)
+      next
+    }
+
+    chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+    print(chi)
+
+    cr <- assocstats(tbl)$cramer
+    cat("Cramér’s V =", round(cr, 3), "\n")
+
+    p_vals <- c(p_vals, chi$p.value)
+    cramer_vals <- c(cramer_vals, cr)
+  }
+
+  adj_p <- p.adjust(p_vals, method = "bonferroni")
+
+  result <- data.frame(
+    Variable = input_vars,
+    Raw_p = round(p_vals, 4),
+    Bonferroni_p = round(adj_p, 4),
+    Cramers_V = round(cramer_vals, 3)
+  )
+  return(result)
+}
+
+# 分析 PO₄ 和 NO₃ 与空间变量关系
+result_Malawi_PO4_river <- analyze_chi_sq(Malawi_RiverPos, "PO4_cat", riverpos_vars)
+result_Malawi_NO3_river <- analyze_chi_sq(Malawi_RiverPos, "NO3_cat", riverpos_vars)
+
+# 打印结果
+cat("\n\n=== Final Results: PO4 vs River Position ===\n")
+print(result_Malawi_PO4_river)
+
+cat("\n\n=== Final Results: NO3 vs River Position ===\n")
+print(result_Malawi_NO3_river)
+
+# 保存结果
+write.csv(result_Malawi_PO4_river, "Malawi_PO4_RiverPosition_Results.csv", row.names = FALSE)
+write.csv(result_Malawi_NO3_river, "Malawi_NO3_RiverPosition_Results.csv", row.names = FALSE)
+```
+```{r}
+# 加载必要库
+library(dplyr)
+library(vcd)
+
+# 数据准备：以 Malawi 为例，也可切换为 Zambia_Data
+Malawi_PollutionSite <- Malawi_Data %>%
+  rename(
+    PO4_cat       = `Phosphate (mg/L)`,
+    NO3_cat       = `Nitrate (mg/L)`,
+    Bin           = Bin,
+    FlyTipping    = Fly_tipping,
+    Landfill      = Landfill_site,
+    Recreational  = Recreational
+  ) %>%
+  filter(!is.na(PO4_cat) & !is.na(NO3_cat))
+
+# 可见污染源与场地使用变量
+pollution_vars <- c("Bin", "FlyTipping", "Landfill", "Recreational")
+
+# 分析函数（通用）
+analyze_chi_sq <- function(data, outcome_var, input_vars) {
+  p_vals <- c()
+  cramer_vals <- c()
+
+  cat("\n=============\nAnalyzing:", outcome_var, "\n=============\n")
+
+  for (var in input_vars) {
+    tbl <- table(data[[var]], data[[outcome_var]])
+    tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+    cat("\n---", var, "vs.", outcome_var, "---\n")
+    print(tbl)
+
+    if (!is.matrix(tbl) || nrow(tbl) < 2 || ncol(tbl) < 2) {
+      cat("⚠️ 非法交叉表（非矩阵或维度不足），跳过此变量\n")
+      p_vals <- c(p_vals, NA)
+      cramer_vals <- c(cramer_vals, NA)
+      next
+    }
+
+    chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+    print(chi)
+
+    cr <- assocstats(tbl)$cramer
+    cat("Cramér’s V =", round(cr, 3), "\n")
+
+    p_vals <- c(p_vals, chi$p.value)
+    cramer_vals <- c(cramer_vals, cr)
+  }
+
+  adj_p <- p.adjust(p_vals, method = "bonferroni")
+
+  result <- data.frame(
+    Variable = input_vars,
+    Raw_p = round(p_vals, 4),
+    Bonferroni_p = round(adj_p, 4),
+    Cramers_V = round(cramer_vals, 3)
+  )
+  return(result)
+}
+
+# 分析 PO₄ 和 NO₃
+result_Malawi_PO4_pollution <- analyze_chi_sq(Malawi_PollutionSite, "PO4_cat", pollution_vars)
+result_Malawi_NO3_pollution <- analyze_chi_sq(Malawi_PollutionSite, "NO3_cat", pollution_vars)
+
+# 打印输出
+cat("\n\n=== Final Results: PO4 vs Pollution Variables ===\n")
+print(result_Malawi_PO4_pollution)
+
+cat("\n\n=== Final Results: NO3 vs Pollution Variables ===\n")
+print(result_Malawi_NO3_pollution)
+
+# 保存结果
+write.csv(result_Malawi_PO4_pollution, "Malawi_PO4_PollutionVariables_Results.csv", row.names = FALSE)
+write.csv(result_Malawi_NO3_pollution, "Malawi_NO3_PollutionVariables_Results.csv", row.names = FALSE)
+```
+```{r}
+# 加载必要库
+library(dplyr)
+library(vcd)
+
+# 数据准备：Zambia 数据 + 重命名变量
+Zambia_PollutionSite <- Zambia_Data %>%
+  rename(
+    PO4_cat       = `Phosphate (mg/L)`,
+    NO3_cat       = `Nitrate (mg/L)`,
+    Bin           = Bin,
+    FlyTipping    = Fly_tipping,
+    Landfill      = Landfill_site,
+    Recreational  = Recreational
+  ) %>%
+  filter(!is.na(PO4_cat) & !is.na(NO3_cat))
+
+# 可见污染源变量
+pollution_vars <- c("Bin", "FlyTipping", "Landfill", "Recreational")
+
+# 分析函数（同前）
+analyze_chi_sq <- function(data, outcome_var, input_vars) {
+  p_vals <- c()
+  cramer_vals <- c()
+
+  cat("\n=============\nAnalyzing:", outcome_var, "\n=============\n")
+
+  for (var in input_vars) {
+    tbl <- table(data[[var]], data[[outcome_var]])
+    tbl <- tbl[rowSums(tbl) > 0, colSums(tbl) > 0]
+
+    cat("\n---", var, "vs.", outcome_var, "---\n")
+    print(tbl)
+
+    if (!is.matrix(tbl) || nrow(tbl) < 2 || ncol(tbl) < 2) {
+      cat("⚠️ 非法交叉表（非矩阵或维度不足），跳过此变量\n")
+      p_vals <- c(p_vals, NA)
+      cramer_vals <- c(cramer_vals, NA)
+      next
+    }
+
+    chi <- chisq.test(tbl, simulate.p.value = TRUE, B = 5000)
+    print(chi)
+
+    cr <- assocstats(tbl)$cramer
+    cat("Cramér’s V =", round(cr, 3), "\n")
+
+    p_vals <- c(p_vals, chi$p.value)
+    cramer_vals <- c(cramer_vals, cr)
+  }
+
+  adj_p <- p.adjust(p_vals, method = "bonferroni")
+
+  result <- data.frame(
+    Variable = input_vars,
+    Raw_p = round(p_vals, 4),
+    Bonferroni_p = round(adj_p, 4),
+    Cramers_V = round(cramer_vals, 3)
+  )
+  return(result)
+}
+
+# 分析 PO₄ 和 NO₃ 与可见污染变量的关系
+result_Zambia_PO4_pollution <- analyze_chi_sq(Zambia_PollutionSite, "PO4_cat", pollution_vars)
+result_Zambia_NO3_pollution <- analyze_chi_sq(Zambia_PollutionSite, "NO3_cat", pollution_vars)
+
+# 输出查看
+cat("\n\n=== Final Results: PO4 vs Pollution Variables ===\n")
+print(result_Zambia_PO4_pollution)
+
+cat("\n\n=== Final Results: NO3 vs Pollution Variables ===\n")
+print(result_Zambia_NO3_pollution)
+
+# 保存为 CSV 文件
+write.csv(result_Zambia_PO4_pollution, "Zambia_PO4_PollutionVariables_Results.csv", row.names = FALSE)
+write.csv(result_Zambia_NO3_pollution, "Zambia_NO3_PollutionVariables_Results.csv", row.names = FALSE)
+```
+```{r}
+# 加载必要的包
+library(sf)
+
+# 设置工作目录到 shapefile 所在文件夹
+setwd("C:/Users/54147/Desktop/Final Project/HydroRIVERS_v10_af_shp")
+
+# 列出所有 .shp 文件（通常只有一个）
+shp_files <- list.files(pattern = "\\.shp$")
+
+# 读取第一个 shapefile 文件为 rivers_africa 对象
+rivers_africa <- st_read(shp_files[1])
+
+# 打印对象信息，确认导入成功
+print(rivers_africa)
+
+```
+
+```{r}
+library(MASS)
+
+MNO3$NO3_cat <- as.factor(MNO3$NO3_cat)
+
+MNO3_Nature_model <- polr(NO3_cat ~ Rain_cat + Width_cat + BodyType, 
+                          data = MNO3, method = "logistic")
+
+summary(MNO3_Nature_model)
+
+# 模型 2：MPO4 - 使用显著变量 Width_cat
+MPO4$PO4_cat <- as.factor(MPO4$PO4_cat)
+
+MPO4_Nature_model <- polr(PO4_cat ~ Width_cat, 
+                          data = MPO4, method = "logistic")
+
+summary(MPO4_Nature_model)
+
+library(MASS)
+
+# 模型 1：ZNO3 - 使用显著变量 Rain_cat, Width_cat
+ZNO3$NO3_cat <- as.factor(ZNO3$NO3_cat)
+
+ZNO3_Nature_model <- polr(NO3_cat ~ Rain_cat + Width_cat, 
+                          data = ZNO3, method = "logistic")
+
+summary(ZNO3_Nature_model)
+
+# 模型 3：ZPO4 - 使用显著变量 Level_cat
+ZPO4$PO4_cat <- as.factor(ZPO4$PO4_cat)
+
+ZPO4_Nature_model <- polr(PO4_cat ~ Level_cat, 
+                          data = ZPO4, method = "logistic")
+
+summary(ZPO4_Nature_model)
+
+```
+```{r}
+# MPO4_HumanActivity_model
+library(MASS)
+MPO4_HumanActivity_model <- polr(PO4_cat ~ Irrigation + Animal_access, data = MPO4, method = "logistic")
+summary(MPO4_HumanActivity_model)
+
+# MNO3_HumanActivity_model
+library(MASS)
+MNO3_HumanActivity_model <- polr(NO3_cat ~ Irrigation + Fishing + Swimming + Public_water_supply, data = MNO3, method = "logistic")
+summary(MNO3_HumanActivity_model)
+
+# ZPO4_HumanActivity_model
+library(MASS)
+ZPO4_HumanActivity_model <- polr(PO4_cat ~ Fishing + Animal_access, data = ZPO4, method = "logistic")
+summary(ZPO4_HumanActivity_model)
+
+# ZNO3_HumanActivity_model
+library(MASS)
+ZNO3_HumanActivity_model <- polr(NO3_cat ~ Boating, data = ZNO3, method = "logistic")
+summary(ZNO3_HumanActivity_model)
+```
+```{r}
+library(MASS)
+
+# 构建包含所有显著变量的模型
+ZNO3_full <- polr(NO3_cat ~ Rain_cat + Width_cat + Boating, 
+                  data = ZNO3, method = "logistic")
+summary(ZNO3_full)
+
+# 尝试 Rain + Width
+model1 <- polr(NO3_cat ~ Rain_cat + Width_cat, data = ZNO3, method = "logistic")
+summary(model1)
+
+# 尝试 Rain + Boating
+model2 <- polr(NO3_cat ~ Rain_cat + Boating, data = ZNO3, method = "logistic")
+summary(model2)
+
+# 尝试 Width + Boating
+model3 <- polr(NO3_cat ~ Width_cat + Boating, data = ZNO3, method = "logistic")
+summary(model3)
+
+```
+```{r}
+# 加载必要包
+library(MASS)
+
+# 确保因变量为因子
+ZPO4$PO4_cat <- as.factor(ZPO4$PO4_cat)
+
+# 只保留所有变量都不缺失的行
+ZPO4_clean <- na.omit(ZPO4[, c("PO4_cat", "Level_cat", "Fishing", "Animal_access", "Fly_tipping")])
+
+# 拟合初始全模型
+ZPO4_full <- polr(PO4_cat ~ Level_cat + Fishing + Animal_access + Fly_tipping,
+                  data = ZPO4_clean, method = "logistic")
+
+# 递减法变量选择
+ZPO4_final <- step(ZPO4_full, direction = "backward")
+
+# 查看结果
+summary(ZPO4_final)
+
+
+```
+
+```{r}
+library(dplyr)
+library(MASS)
+
+# Step 1: 创建一个干净的数据副本，并重命名列
+MPO4_clean <- MPO4 %>%
+  transmute(
+    PO4_cat = PO4_cat,
+    Width = Width_cat,
+    Irrigation = Irrigation,
+    Animal = Animal_access,
+    Bin = `Bin`,
+    Recreation = `Recreational`,
+    Edge1m = `Within_1m_of_river_edge`,
+    OnWater = `In_on_the_water`
+  ) %>%
+  na.omit()
+
+# Step 2: 确保因变量是有序因子（如果尚未设置）
+MPO4_clean$PO4_cat <- as.factor(MPO4_clean$PO4_cat)
+
+# Step 3: 建立逻辑回归模型（先使用全模型）
+MPO4_model_full <- polr(
+  PO4_cat ~ Width + Irrigation + Animal + Bin + Recreation + Edge1m + OnWater,
+  data = MPO4_clean,
+  method = "logistic"
+)
+
+# Step 4: 输出摘要结果
+summary(MPO4_model_full)
+
+library(MASS)
+
+# 逐步递减建模（从全模型开始）
+MPO4_step_model <- step(
+  MPO4_model_full,
+  direction = "backward",
+  trace = TRUE  # 显示每一步的 AIC 和变量变化
+)
+
+# 输出最终模型结果
+summary(MPO4_step_model)
+
+```
+```{r}
+# 加载必要库
+library(dplyr)
+library(MASS)
+
+# Step 1: 创建干净数据并重命名变量
+MNO3_clean <- MNO3 %>%
+  transmute(
+    NO3_cat = NO3_cat,
+    Rain = Rain_cat,
+    Width = Width_cat,
+    BodyType = BodyType,
+    Irrigation = Irrigation,
+    Fishing = Fishing,
+    Swimming = Swimming,
+    WaterSupply = Public_water_supply,
+    Bin = Bin,
+    FlyTipping = Fly_tipping,
+    Recreation = Recreational,
+    Agriculture = Agriculture,
+    UrbanResidential = Urban_residential,
+    RuralResidential = Rural_residential,
+    Grassland = Grassland,
+    Edge_1_5m = `1_5m_from_river_edge`,
+    Edge_1m = Within_1m_of_river_edge,
+    OnWater = In_on_the_water
+  ) %>%
+  na.omit()
+
+# Step 2: 确保因变量为因子（如果需要则设定为有序）
+MNO3_clean$NO3_cat <- as.factor(MNO3_clean$NO3_cat)
+
+# Step 3: 构建全模型
+MNO3_model_full <- polr(
+  NO3_cat ~ Rain + Width + BodyType + Irrigation + Fishing + Swimming +
+    WaterSupply + Bin + FlyTipping + Recreation +
+    Agriculture + UrbanResidential + RuralResidential + Grassland +
+    Edge_1_5m + Edge_1m + OnWater,
+  data = MNO3_clean,
+  method = "logistic"
+)
+
+# Step 4: 输出全模型摘要
+summary(MNO3_model_full)
+
+# Step 5: 执行逐步递减模型选择
+MNO3_step_model <- step(
+  MNO3_model_full,
+  direction = "backward",
+  trace = TRUE
+)
+
+# Step 6: 输出最终模型结果
+summary(MNO3_step_model)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
